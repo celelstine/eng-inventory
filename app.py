@@ -23,15 +23,16 @@ token = args.token
 
 headers = {"Authorization": "bearer %s" % token}
 
-def fetch_pr_stat(count=20):
+def fetch_pr_stat(count=20, cursor=None):
     """
     get details of PR for a repo from github
     """
     query = """
     { 
         repository (name: "%s", owner: "%s") { 
-            pullRequests(last: %d) {
+            pullRequests(last: %d %s) {
                 edges {
+                    cursor
                     pullRequest:node {
                         number
                         title
@@ -52,16 +53,26 @@ def fetch_pr_stat(count=20):
                                 }
                             }
                         }
+                        timelineItems(itemTypes:[REVIEW_REQUESTED_EVENT], first: 1) {
+                            nodes {
+                                __typename
+                                ... on ReviewRequestedEvent{
+                                    createdAt
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
-    """ % (repo, owner, count)
-    print('running query:\t', query)
+    """ % (repo, owner, count, ', before: "%s"' % cursor  if cursor else '')
+    print('running query......', query)
 
     request = requests.post('https://api.github.com/graphql', json={'query': query}, headers=headers)
+    print('request', request)
     if request.status_code == 200:
+        print('done')
         return request.json()
     else:
         raise Exception("Query failed to run by returning code of {}. {}".format(request.status_code, query))
@@ -71,36 +82,54 @@ def fetch_pr_stat(count=20):
 
 def main():
 
-    result = fetch_pr_stat() # Execute the query
-    prs = result['data']['repository']['pullRequests']['edges']
+    def get_first_review_request(pr):
+        if len(pr['pullRequest']['timelineItems']['nodes']) > 0:
+            return pr['pullRequest']['timelineItems']['nodes'][0]['createdAt']
+        else:
+            return ''
+    
+    count = 0
+    cursor = None
 
-    pre_processed_data = [ 
-        {
-            "id": pr['pullRequest']['number'],
-            "title": pr['pullRequest']['title'],
-            "createdAt": pr['pullRequest']['createdAt'],
-            "mergedAt": pr['pullRequest']['mergedAt'],
-            "closedAt": pr['pullRequest']['closedAt'],
-            "state": pr['pullRequest']['state'],
-            "baseRefName": pr['pullRequest']['baseRefName'],
-            "headRefName": pr['pullRequest']['headRefName'],
-            "first_commit_date": pr['pullRequest']['commits']['edges'][0]['node']['commit']['committedDate'],
-            "no_commits": pr['pullRequest']['commits']['totalCount']
-        } for pr in prs
-    ]
+    PR_data  = []
 
-    csv_file = filename
-    csv_columns = ['id','title','createdAt','mergedAt', 'closedAt', 'state', 'baseRefName', 'headRefName','first_commit_date', 'no_commits']
+    while (count < 1000):
+        result = fetch_pr_stat(100, cursor=cursor) # Execute the query
+        prs = result['data']['repository']['pullRequests']['edges']
+        count += len(prs)
+        cursor = prs[0]['cursor']
+        print('count', count)
 
-    file_exist = os.path.exists(csv_file)
+        pre_processed_data = [ 
+            {
+                "id": pr['pullRequest']['number'],
+                "title": pr['pullRequest']['title'],
+                "createdAt": pr['pullRequest']['createdAt'],
+                "mergedAt": pr['pullRequest']['mergedAt'],
+                "closedAt": pr['pullRequest']['closedAt'],
+                "state": pr['pullRequest']['state'],
+                "baseRefName": pr['pullRequest']['baseRefName'],
+                "headRefName": pr['pullRequest']['headRefName'],
+                "first_commit_date": pr['pullRequest']['commits']['edges'][0]['node']['commit']['committedDate'],
+                "no_commits": pr['pullRequest']['commits']['totalCount'],
+                "first_review_request": get_first_review_request(pr)
+            } for pr in prs
+        ]
+
+        PR_data.extend(pre_processed_data)
+
+    csv_columns = ['id','title','createdAt','mergedAt', 'closedAt', 'state', 'baseRefName', 'headRefName','first_commit_date', 'no_commits', 'first_review_request']
+    file_exist = os.path.exists(filename)
     try:
-        with open(csv_file, 'a+') as csvfile:
+        with open(filename, 'a+') as csvfile:
             writer = csv.DictWriter(csvfile, fieldnames=csv_columns)
-
             # create header when we have a new file
             if file_exist is False:
+                print('writting body.................')
                 writer.writeheader()
-            for data in pre_processed_data:
+            
+            print('writting data to body.......')
+            for data in reversed(PR_data):
                 writer.writerow(data)
     except IOError:
         print("I/O error")
