@@ -11,6 +11,7 @@ parser = argparse.ArgumentParser(
 parser.add_argument('repo', nargs=1,help='title of github repo')
 parser.add_argument('owner',  nargs=1,help='username of the owner of the repo')
 parser.add_argument('filename',  nargs=1,help='name of the csv file to write data to')
+parser.add_argument('number',  nargs=1,help='name of the csv file to write data to')
 parser.add_argument('--token', required=True, help="Github access token")
 
 args = parser.parse_args()
@@ -18,6 +19,7 @@ args = parser.parse_args()
 repo = args.repo[0]
 owner = args.owner[0]
 filename = args.filename[0]
+number = int(args.number[0])
 token = args.token
 
 
@@ -87,18 +89,26 @@ def main():
             return pr['pullRequest']['timelineItems']['nodes'][0]['createdAt']
         else:
             return ''
-    
+
+    def get_first_commit_date(pr):
+        if pr['pullRequest']['commits']['totalCount'] > 0 :
+            return pr['pullRequest']['commits']['edges'][0]['node']['commit']['committedDate']
+        else:
+            return ''
+
     count = 0
     cursor = None
 
     PR_data  = []
 
-    while (count < 1000):
+    while (count < number):
         result = fetch_pr_stat(100, cursor=cursor) # Execute the query
         prs = result['data']['repository']['pullRequests']['edges']
         count += len(prs)
-        cursor = prs[0]['cursor']
+        cursor = prs[0]['cursor'] if len(prs) > 0 else None
         print('count', count)
+        
+    
 
         pre_processed_data = [ 
             {
@@ -110,12 +120,12 @@ def main():
                 "state": pr['pullRequest']['state'],
                 "baseRefName": pr['pullRequest']['baseRefName'],
                 "headRefName": pr['pullRequest']['headRefName'],
-                "first_commit_date": pr['pullRequest']['commits']['edges'][0]['node']['commit']['committedDate'],
+                "first_commit_date": get_first_commit_date(pr),
                 "no_commits": pr['pullRequest']['commits']['totalCount'],
                 "first_review_request": get_first_review_request(pr)
             } for pr in prs
         ]
-
+    
         PR_data.extend(pre_processed_data)
 
     csv_columns = ['id','title','createdAt','mergedAt', 'closedAt', 'state', 'baseRefName', 'headRefName','first_commit_date', 'no_commits', 'first_review_request']
