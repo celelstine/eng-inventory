@@ -6,4 +6,4 @@ Python app to create an inventory of engineering work
 - clone the repo and `cd` to the directory
 - activate your working environment `pipenv shell`
 - install dep `pip install `
-- use the app like so `python app.py pymetrics pymetrics pr.csv --token <token> `
+- use the app like so `python app.py pymetrics pymetrics pr.csv 3000 --token <token> `
